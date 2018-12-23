@@ -8,7 +8,7 @@ float rlist[30];
 
 int main () {
 
-	float avg, sum, dfare;
+	float avg, sum, dfare = 0;
 
 	int i = 0;
 	
