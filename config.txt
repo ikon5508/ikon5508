@@ -1,0 +1,2 @@
+rootfile/=add.htm
+connection=term
