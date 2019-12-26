@@ -126,10 +126,16 @@ for (int i = 0;i < lenstr; i++)
 
 int main(int argc, char** argv)
 {
-
-char root_file[100];
-long fsize;
+//char hello[] = "HTTP/1.1 200 OK\r\n Content-Type: text/html\r\n\r\n<html><head></head><body>Hello, <br> This is a test</body></html>\r\n\r\n";
 char buffer[1000];
+char root_file[100];
+char chr[100];
+
+
+long fsize = 0;
+int end_line = 0;
+int in_search = 0;
+int saveget = 0;
 
 FILE *f = fopen("config.txt", "rb");
 
@@ -143,15 +149,20 @@ fclose(f);
 
 //printf ("%s", buffer);
 
-int end_line;
+//get end of first line, for rootfile/=
 end_line = instr(0, 1000, "\n", buffer);
 
-//printf ("%i", end_line);
+//seperate rootfile with midstr
 midstr(10, end_line, root_file, buffer);
-//printf ("%s", root_file);
 
+//search and isolate saveget=0 or 1 into chr string
+in_search = instr(0, 1000, "saveget=", buffer);
+midstr(in_search + 8, in_search + 9, chr, buffer);
 
-exit (0);
+if (chr[0] == '1')
+	saveget = 1;
+
+// open socket for lsitening
 
     struct sockaddr_in clientaddr; //
     int default_port = 9999, listenfd, connfd; //
@@ -183,9 +194,57 @@ exit (0);
     int n = read(connfd, buffer,512);
      if (n < 0) perror("ERROR reading from socket");
  
-//printf("%s", buffer);
+if (saveget) {
+char time_stamp[100];
+    time_t current_time;
+    char* c_time_string;
 
-//char hello[] = "HTTP/1.1 200 OK\r\n Content-Type: text/html\r\n\r\n<html><head></head><body>Hello, <br> This is a test</body></html>\r\n\r\n";
+	
+    /* Obtain current time. */
+    current_time = time(NULL);
+
+    if (current_time == ((time_t)-1))
+    {
+        (void) fprintf(stderr, "Failure to obtain the current time.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Convert to local time format. */
+    c_time_string = ctime(&current_time);
+
+    if (c_time_string == NULL)
+    {
+        (void) fprintf(stderr, "Failure to convert the current time.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Print to stdout. ctime() has already added a terminating newline character. */
+    //(void) printf("%s", c_time_string);
+
+f = fopen(c_time_string, "w");
+
+
+//fwrite(buffer ,512, 1, f);
+    fprintf(f, "%s", buffer);
+//printf("%s", buffer);
+fclose(f);
+
+}
+
+
+
+
+f = fopen(root_file, "rb");
+
+fseek(f, 0, SEEK_END);
+fsize = ftell(f);
+fseek(f, 0, SEEK_SET);
+
+fread(buffer, fsize, 1, f);
+buffer[fsize] = 0;
+fclose(f);
+
+
 
 
 write(connfd,buffer,fsize);
