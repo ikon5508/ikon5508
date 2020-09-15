@@ -1,0 +1,6 @@
+cd ..
+rm -v server
+cd src
+cc -o server new.c
+mv -v server ..
+

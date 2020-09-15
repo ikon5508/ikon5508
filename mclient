@@ -1,0 +1,5 @@
+rm -v client
+cd src
+cc -o client client.c
+mv -v client ..
+cd ..
