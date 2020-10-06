@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+//#include <sys/types.h>
+       #include <sys/stat.h>
+       #include <fcntl.h>
 
 void error(char *msg)
 {
@@ -20,6 +23,8 @@ int main(int argc, char *argv[])
 {
 
     char buffer[10000];
+
+
 if (argc == 2)
 {
 printf("connecting localhost, request: %s\n", argv[1]);
@@ -66,5 +71,9 @@ sprintf(buffer, "GET %s HTTP/1.1 OK\n", argv[1]);
     if (n < 0) 
          error("ERROR reading from socket");
     printf("%s\n",buffer);
-    return 0;
+//    return 0;
+int fd;
+fd = open ("output.txt", O_CREAT | O_WRONLY);
+write (fd, buffer, n);
+
 }
