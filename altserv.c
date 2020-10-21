@@ -1,11 +1,3 @@
-/*
-Copyright (c) 2017 Darren Smith
-
-ssl_examples is free software; you can redistribute it and/or modify
-it under the terms of the MIT license. See LICENSE for details.
-*/
-
-
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
@@ -102,7 +94,8 @@ void ssl_client_cleanup(struct ssl_client *p)
 }
 
 int ssl_client_want_write(struct ssl_client *cp) {
-  return (cp->write_len>0);
+//printf ("ssl clisnt want wr\n");
+return (cp->write_len>0);
 }
 
 /* Obtain the return value of an SSL operation and convert into a simplified
@@ -162,61 +155,13 @@ enum sslstatus do_ssl_handshake()
         return SSLSTATUS_FAIL;
     } while (n>0);
 
+printf ("%d\n", status);
+
   return status;
 }
 
 /* Process SSL bytes received from the peer. The data needs to be fed into the
    SSL object to be unencrypted.  On success, returns 0, on SSL error -1. */
-int on_read_cb(char* src, size_t len)
-{
-  char buf[DEFAULT_BUF_SIZE];
-  enum sslstatus status;
-  int n;
-
-  while (len > 0) {
-    n = BIO_write(client.rbio, src, len);
-
-    if (n<=0)
-      return -1; /* assume bio write failure is unrecoverable */
-
-    src += n;
-    len -= n;
-
-    if (!SSL_is_init_finished(client.ssl)) {
-      if (do_ssl_handshake() == SSLSTATUS_FAIL)
-        return -1;
-      if (!SSL_is_init_finished(client.ssl))
-        return 0;
-    }
-
-    /* The encrypted data is now in the input bio so now we can perform actual
-     * read of unencrypted data. */
-
-    do {
-      n = SSL_read(client.ssl, buf, sizeof(buf));
-      if (n > 0)
-        client.io_on_read(buf, (size_t)n);
-    } while (n > 0);
-
-    status = get_sslstatus(client.ssl, n);
-
-    /* Did SSL request to write bytes? This can happen if peer has requested SSL
-     * renegotiation. */
-    if (status == SSLSTATUS_WANT_IO)
-      do {
-        n = BIO_read(client.wbio, buf, sizeof(buf));
-        if (n > 0)
-          queue_encrypted_bytes(buf, n);
-        else if (!BIO_should_retry(client.wbio))
-          return -1;
-      } while (n>0);
-
-    if (status == SSLSTATUS_FAIL)
-      return -1;
-  }
-
-  return 0;
-}
 
 /* Process outbound unencrypted data that is waiting to be encrypted.  The
  * waiting data resides in encrypt_buf.  It needs to be passed into the SSL
@@ -260,26 +205,80 @@ int do_encrypt()
   return 0;
 }
 
-/* Read bytes from stdin and queue for later encryption. */
-void do_stdin_read()
-{
-  char buf[DEFAULT_BUF_SIZE];
-  ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
-  if (n>0)
-    send_unencrypted_bytes(buf, (size_t)n);
-}
 
-/* Read encrypted bytes from socket. */
 int do_sock_read()
 {
   char buf[DEFAULT_BUF_SIZE];
-  ssize_t n = read(client.fd, buf, sizeof(buf));
+  int n = read(client.fd, buf, sizeof(buf));
+	if (n < 0)
+		{printf ("fail on buffread\n"); return -1;}
+size_t len = n;
+char *src = buf;
+enum sslstatus status;
 
-  if (n>0)
-    return on_read_cb(buf, (size_t)n);
-  else
-    return -1;
-}
+while (len > 0) {
+n = BIO_write(client.rbio, src, len);
+
+if (n<=0)
+{printf ("fail on biowrite\n"); return -1;}
+//return -1; /* assume bio write failure is unrecoverable */
+
+src += n;
+len -= n;
+
+if (!SSL_is_init_finished(client.ssl)) {
+if (do_ssl_handshake() == SSLSTATUS_FAIL)
+{printf ("fail on hanshake\n"); return -1;}
+//return -1;
+
+if (!SSL_is_init_finished(client.ssl))
+{printf ("fail on handshake 2, 0 retn\n"); return 0;}
+//return 0;
+} // end if renegotiate
+
+do {
+n = SSL_read(client.ssl, buf, sizeof(buf));
+//if (n > 0)
+//print_unencrypted_data(buf ,(size_t) n);
+//client.io_on_read(buf, (size_t)n);
+} while (n > 0);
+
+status = get_sslstatus(client.ssl, n);
+
+/* Did SSL request to write bytes? This can happen if peer has requested SSL
+     * renegotiation. */
+if (status == SSLSTATUS_WANT_IO)
+do {
+n = BIO_read(client.wbio, buf, sizeof(buf));
+if (n > 0)
+queue_encrypted_bytes(buf, n);
+else if (!BIO_should_retry(client.wbio))
+{printf ("fail bio retry\n"); return -1;}
+//return -1;
+} while (n>0);
+
+if (status == SSLSTATUS_FAIL)
+{printf ("fail ssl stat fail\n"); return -1;}
+//return -1;
+} // while buf > 0
+
+
+const char *hello = "HTTP/1.1 200 OK\nContent-Type: text/plain\nContent-Length: 12\n\nHello world!";
+ send_unencrypted_bytes(hello, strlen(hello));
+  //return 0;
+} //end do sock read
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* Write encrypted bytes to the socket. */
 int do_sock_write()
@@ -333,23 +332,33 @@ void ssl_init(const char * certfile, const char* keyfile)
 
 int main(int argc, char **argv)
 {
-  int port = argc>1? atoi(argv[1]):55555;
-  char* host="127.0.0.1";
+  char str[INET_ADDRSTRLEN];
+  int port = (argc>1)? atoi(argv[1]):9999;
 
-  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-  if (sockfd < 0)
+  int servfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (servfd < 0)
     die("socket()");
 
-  /* Specify socket address */
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-  if (inet_pton(AF_INET, host, &(addr.sin_addr)) <= 0)
-    die("inet_pton()");
+  int enable = 1;
+  if (setsockopt(servfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0)
+    die("setsockopt(SO_REUSEADDR)");
 
-  if (connect(sockfd, (struct sockaddr*) &addr, sizeof(addr)) < 0)
-    die("connect()");
+  /* Specify socket address */
+  struct sockaddr_in servaddr;
+  memset(&servaddr, 0, sizeof(servaddr));
+  servaddr.sin_family = AF_INET;
+  servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+  servaddr.sin_port = htons(port);
+
+  if (bind(servfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+    die("bind()");
+
+  if (listen(servfd, 128) < 0)
+    die("listen()");
+
+  int clientfd;
+  struct sockaddr_in peeraddr;
+  socklen_t peeraddr_len = sizeof(peeraddr);
 
   struct pollfd fdset[2];
   memset(&fdset, 0, sizeof(fdset));
@@ -357,50 +366,58 @@ int main(int argc, char **argv)
   fdset[0].fd = STDIN_FILENO;
   fdset[0].events = POLLIN;
 
-  ssl_init(0,0);
-  ssl_client_init(&client, sockfd, SSLMODE_CLIENT);
-
-  fdset[1].fd = sockfd;
-  fdset[1].events = POLLERR | POLLHUP | POLLNVAL | POLLIN;
-#ifdef POLLRDHUP
-  fdset[1].events |= POLLRDHUP;
-#endif
-
-  /* event loop */
-
-  do_ssl_handshake();
+  ssl_init("server.crt", "server.key"); // see README to create these files
 
   while (1) {
-    fdset[1].events &= ~POLLOUT;
-    fdset[1].events |= ssl_client_want_write(&client)? POLLOUT:0;
+    printf("waiting for next connection on port %d\n", port);
 
-    int nready = poll(&fdset[0], 2, -1);
+    clientfd = accept(servfd, (struct sockaddr *)&peeraddr, &peeraddr_len);
+    if (clientfd < 0)
+      die("accept()");
+printf ("client accepted\n");
 
-    if (nready == 0)
-      continue; /* no fd ready */
+    ssl_client_init(&client, clientfd, SSLMODE_SERVER);
 
-    int revents = fdset[1].revents;
-    if (revents & POLLIN)
-      if (do_sock_read() == -1)
+//    inet_ntop(peeraddr.sin_family, &peeraddr.sin_addr, str, INET_ADDRSTRLEN);
+  //  printf("new connection from %s:%d\n", str, ntohs(peeraddr.sin_port));
+
+    fdset[1].fd = clientfd;
+
+
+    /* event loop */
+
+    fdset[1].events = POLLERR | POLLHUP | POLLNVAL | POLLIN;
+
+    while (1) {
+      fdset[1].events &= ~POLLOUT;
+      fdset[1].events |= (ssl_client_want_write(&client)? POLLOUT : 0);
+
+      int nready = poll(&fdset[0], 2, -1);
+
+      if (nready == 0)
+        continue; /* no fd ready */
+
+      int revents = fdset[1].revents;
+      if (revents & POLLIN)
+	if (do_sock_read() == -1)
+         	{/*printf("break!\n");*/ break;}
+      if (revents & POLLOUT)
+        if (do_sock_write() == -1)
+          break;
+      if (revents & (POLLERR | POLLHUP | POLLNVAL))
         break;
-    if (revents & POLLOUT)
-      if (do_sock_write() == -1)
-        break;
-    if (revents & (POLLERR | POLLHUP | POLLNVAL))
-      break;
-#ifdef POLLRDHUP
-    if (revents & POLLRDHUP)
-      break;
-#endif
-    if (fdset[0].revents & POLLIN)
+      
+
+if (fdset[0].revents & POLLIN)
       do_stdin_read();
-    if (client.encrypt_len>0)
-      do_encrypt();
-  }
+      if (client.encrypt_len>0)
+        do_encrypt();
+    }
 
-  close(fdset[1].fd);
+   close(fdset[1].fd);
+//do_sock_read();  
   ssl_client_cleanup(&client);
+  }
 
   return 0;
 }
-
